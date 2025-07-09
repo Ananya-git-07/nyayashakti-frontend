@@ -1,1 +1,0 @@
-# nyayashakti-frontend
