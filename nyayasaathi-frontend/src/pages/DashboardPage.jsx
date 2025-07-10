@@ -3,9 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { MicrophoneIcon, DocumentChartBarIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/solid';
+import useVoiceRecognition from '../hooks/useVoiceRecognition'; // <-- IMPORT THE HOOK
+import { MicrophoneIcon, DocumentChartBarIcon, ArrowRightOnRectangleIcon, PaperAirplaneIcon } from '@heroicons/react/24/solid';
 
 const StatusBadge = ({ status }) => {
+    // ... (This component remains the same)
     const statusClasses = {
         Pending: 'bg-yellow-100 text-yellow-800',
         Submitted: 'bg-blue-100 text-blue-800',
@@ -19,32 +21,67 @@ const StatusBadge = ({ status }) => {
     );
 };
 
+
 const DashboardPage = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
     const [issues, setIssues] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [submitStatus, setSubmitStatus] = useState('');
+
+    // --- VOICE RECOGNITION STATE ---
+    const { text, isListening, startListening, hasRecognitionSupport } = useVoiceRecognition();
+    const [issueDescription, setIssueDescription] = useState('');
+
+    // Update the text area when the voice recognition result changes
+    useEffect(() => {
+        setIssueDescription(text);
+    }, [text]);
+
+    const fetchIssues = async () => {
+        try {
+            const { data } = await api.get('/citizens/issues');
+            setIssues(data.issues);
+        } catch (err) {
+            setError('Failed to load your cases. Please try again later.');
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchIssues = async () => {
-            try {
-                const { data } = await api.get('/citizens/issues');
-                setIssues(data.issues);
-            } catch (err) {
-                setError('Failed to load your cases. Please try again later.');
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchIssues();
     }, []);
-    
+
     const handleLogout = async () => {
         await logout();
         navigate('/');
     };
+
+    // --- FUNCTION TO SUBMIT THE NEW CASE ---
+    const handleCaseSubmit = async () => {
+        if (!issueDescription) {
+            setSubmitStatus({ type: 'error', message: 'Description cannot be empty.' });
+            return;
+        }
+        setSubmitStatus({ type: 'loading', message: 'Submitting your case...' });
+        try {
+            // This matches the `citizensRoutes.js` endpoint
+            await api.post('/citizens/issues', {
+                issueType: 'Other', // You can add a dropdown/modal to select this
+                description: issueDescription,
+                // kiosk and other fields can be added later
+            });
+            setSubmitStatus({ type: 'success', message: 'Case submitted successfully!' });
+            setIssueDescription(''); // Clear the textarea
+            fetchIssues(); // Refresh the list of issues
+        } catch (err) {
+            setSubmitStatus({ type: 'error', message: 'Failed to submit case. Please try again.' });
+        }
+    };
+
 
     return (
         <div className="min-h-screen bg-gray-50">
@@ -63,19 +100,59 @@ const DashboardPage = () => {
             </header>
 
             <main className="container mx-auto p-6">
-                {/* Voice Action Card */}
-                <div className="bg-brand-primary text-white p-8 rounded-xl shadow-lg flex flex-col md:flex-row items-center justify-between">
-                    <div>
-                        <h2 className="text-4xl font-bold">Start a New Case</h2>
-                        <p className="mt-2 text-lg opacity-90">Just click the mic and state your problem.</p>
-                    </div>
-                    <button className="mt-6 md:mt-0 bg-white text-brand-primary rounded-full p-6 shadow-xl transform hover:scale-110 transition-transform">
-                        <MicrophoneIcon className="w-14 h-14" />
-                    </button>
+                {/* --- UPDATED VOICE ACTION CARD --- */}
+                <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-200">
+                    <h2 className="text-3xl font-bold text-brand-dark mb-4">Start a New Case</h2>
+                    
+                    {!hasRecognitionSupport && (
+                        <p className="text-red-500">Sorry, your browser does not support voice recognition.</p>
+                    )}
+                    
+                    {hasRecognitionSupport && (
+                        <div className="flex flex-col md:flex-row items-center gap-6">
+                            <button
+                                onClick={startListening}
+                                disabled={isListening}
+                                className={`rounded-full p-5 shadow-lg transition-transform transform hover:scale-105 ${
+                                    isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-brand-primary text-white'
+                                }`}
+                            >
+                                <MicrophoneIcon className="w-10 h-10" />
+                            </button>
+                            <div className="w-full">
+                                <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+                                    {isListening ? "Listening..." : "Click the mic or type your issue below:"}
+                                </label>
+                                <textarea
+                                    id="description"
+                                    rows={3}
+                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-primary focus:ring-brand-primary sm:text-sm"
+                                    value={issueDescription}
+                                    onChange={(e) => setIssueDescription(e.target.value)}
+                                    placeholder="e.g., 'My pension has not arrived for three months...'"
+                                />
+                                <div className="mt-2 flex justify-end items-center">
+                                    {submitStatus && (
+                                        <p className={`text-sm mr-4 ${submitStatus.type === 'error' ? 'text-red-600' : 'text-green-600'}`}>
+                                            {submitStatus.message}
+                                        </p>
+                                    )}
+                                    <button
+                                        onClick={handleCaseSubmit}
+                                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-brand-secondary hover:bg-brand-primary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary"
+                                    >
+                                        Submit Case
+                                        <PaperAirplaneIcon className="ml-2 -mr-1 h-5 w-5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* My Legal Issues */}
                 <div className="mt-10">
+                    {/* ... (This section remains the same) ... */}
                     <h3 className="text-2xl font-bold text-brand-dark mb-4 flex items-center">
                         <DocumentChartBarIcon className="w-7 h-7 mr-2 text-brand-secondary"/>
                         My Cases
